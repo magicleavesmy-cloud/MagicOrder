@@ -15,6 +15,7 @@ import { db } from './firebase'
 
 const todayKey = () => new Date().toISOString().slice(0, 10)
 const money = (value) => `RM ${Number(value || 0).toFixed(2)}`
+const costMoney = (value) => `RM ${Number(value || 0).toFixed(3)}`
 const numberValue = (value) => Math.max(0, Number(value) || 0)
 const makeId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 const PRODUCT_TYPE_OPTIONS = ['Red', 'Blue', 'Black Menthol', 'Ice Blast']
@@ -399,7 +400,7 @@ function App() {
               orders={data.orders}
               duitStock={duitStock}
               products={data.products}
-              onGoCheck={() => setPage('check')}
+              onGoCheck={() => setPage('stock')}
             />
           )}
 
@@ -962,7 +963,7 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
                     </div>
                     <div className="po-cost">
                       <span>Cost price</span>
-                      <strong>{money(product.defaultBuyingPrice)}</strong>
+                      <strong>{costMoney(product.defaultBuyingPrice)}</strong>
                     </div>
                     <label className={autoFillHighlights[product.id] ? 'order-autofilled' : ''}>
                       <span>Order qty</span>
@@ -1013,7 +1014,7 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
                   <strong>{finalQty}</strong>
                 </div>
                 <div className="confirmed-money">
-                  <span>{money(costPrice)} / pkt</span>
+                  <span>{costMoney(costPrice)} / pkt</span>
                   <strong>{money(finalQty * costPrice)}</strong>
                 </div>
                 <div className="row-actions">
@@ -1403,7 +1404,7 @@ function ReceiveOrder({ order, onConfirm, onBack }) {
           <article className="receive-row" key={item.productId}>
             <div className="product-title">
               <strong>{item.productName}</strong>
-              <span>{money(item.buyingPrice)} / pkt</span>
+              <span>{costMoney(item.buyingPrice)} / pkt</span>
             </div>
             <div className="mini-stat keep-stat">
               <span>Ordered</span>
@@ -1443,6 +1444,7 @@ function ReceiveOrder({ order, onConfirm, onBack }) {
 }
 
 function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, onSave, onDelete }) {
+  const [expandedBrand, setExpandedBrand] = useState('')
   const blankProduct = {
     id: '',
     name: '',
@@ -1459,6 +1461,31 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
   const typeOptions = Array.from(
     new Set([...PRODUCT_TYPE_OPTIONS, ...products.map((product) => product.flavour).filter(Boolean)]),
   )
+  const productsByBrand = useMemo(() => {
+    const groups = products.reduce((collection, product) => {
+      const brand = product.brand || 'Unbranded'
+      collection[brand] ||= []
+      collection[brand].push(product)
+      return collection
+    }, {})
+
+    return Object.entries(groups)
+      .sort(([brandA], [brandB]) => brandA.localeCompare(brandB))
+      .map(([brand, brandProducts]) => {
+        const sortedProducts = [...brandProducts].sort((a, b) =>
+          (a.flavour || productDisplayName(a)).localeCompare(b.flavour || productDisplayName(b)),
+        )
+        const totalStock = sortedProducts.reduce(
+          (sum, product) => sum + numberValue(duitStock[product.id]?.qty ?? product.currentStock),
+          0,
+        )
+        const totalValue = sortedProducts.reduce((sum, product) => {
+          const qty = numberValue(duitStock[product.id]?.qty ?? product.currentStock)
+          return sum + qty * numberValue(product.defaultBuyingPrice)
+        }, 0)
+        return { brand, products: sortedProducts, totalStock, totalValue }
+      })
+  }, [duitStock, products])
 
   return (
     <section className="page-stack">
@@ -1484,20 +1511,49 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
         />
       )}
 
-      <div className="card-grid">
-        {products.map((product) => (
-          <article className="entity-card" key={product.id}>
-            <div>
-              <h3>{productDisplayName(product)}</h3>
-              <span>{duitStock[product.id]?.qty || 0} pkt current / {product.keepStockQty} pkt default</span>
-              <p>{money(product.defaultBuyingPrice)} per packet</p>
-            </div>
-            <div className="entity-actions">
-              <button className="ghost-button" onClick={() => onEdit(product)}>Edit</button>
-              <button className="danger-button" onClick={() => onDelete(product.id)}>Delete</button>
-            </div>
-          </article>
-        ))}
+      <div className="brand-product-groups">
+        {productsByBrand.map(({ brand, products: brandProducts, totalStock, totalValue }) => {
+          const isExpanded = expandedBrand === brand
+          return (
+            <section className="product-brand-group" key={brand}>
+              <button
+                className={`product-brand-card ${isExpanded ? 'active' : ''}`}
+                onClick={() => setExpandedBrand(isExpanded ? '' : brand)}
+              >
+                <span>
+                  <strong>{brand}</strong>
+                  <small>{brandProducts.length} products</small>
+                </span>
+                <span>
+                  <small>Total stock</small>
+                  <strong>{totalStock} pkt</strong>
+                </span>
+                <span>
+                  <small>Total value</small>
+                  <strong>{costMoney(totalValue)}</strong>
+                </span>
+              </button>
+
+              {isExpanded ? (
+                <div className="product-brand-details">
+                  {brandProducts.map((product) => (
+                    <article className="product-detail-row" key={product.id}>
+                      <div className="product-title">
+                        <strong>{productDisplayName(product)}</strong>
+                        <span>{duitStock[product.id]?.qty || 0} pkt current / {product.keepStockQty} pkt default</span>
+                        <p>{costMoney(product.defaultBuyingPrice)} per packet</p>
+                      </div>
+                      <div className="entity-actions">
+                        <button className="ghost-button" onClick={() => onEdit(product)}>Edit</button>
+                        <button className="danger-button" onClick={() => onDelete(product.id)}>Delete</button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          )
+        })}
       </div>
     </section>
   )
@@ -1543,7 +1599,7 @@ function ProductForm({ product, typeOptions, onSave, onCancel }) {
         </label>
         <label>
           <span>Cost price</span>
-          <input type="number" min="0" step="0.01" inputMode="decimal" value={form.costPrice ?? form.defaultBuyingPrice} onChange={(event) => update('costPrice', event.target.value)} placeholder="17.80" />
+          <input type="number" min="0" step="0.001" inputMode="decimal" value={form.costPrice ?? form.defaultBuyingPrice} onChange={(event) => update('costPrice', event.target.value)} placeholder="17.064" />
         </label>
       </div>
       <label>
