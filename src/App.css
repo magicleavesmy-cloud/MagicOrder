@@ -1733,3 +1733,370 @@ option {
     grid-template-columns: minmax(0, 1fr) auto 54px;
   }
 }
+
+/* Compact density pass */
+.app-shell {
+  padding-top: calc(10px + env(safe-area-inset-top));
+}
+
+.page-stack,
+.dashboard-list,
+.brand-results,
+.confirmed-list,
+.stock-check-list,
+.card-grid,
+.small-list,
+.list-table,
+.entry-panel,
+.brand-section,
+.brand-section-wrap {
+  gap: 6px;
+}
+
+.topbar,
+.hero-band,
+.metric-card,
+.summary-card,
+.dashboard-panel,
+.dashboard-row,
+.entry-panel,
+.entry-card,
+.brand-section,
+.stock-check-panel,
+.stock-check-row,
+.brand-product-row,
+.confirmed-row,
+.order-card,
+.entity-card,
+.editor-panel,
+.receive-row,
+.small-order,
+.empty-state {
+  border-radius: 8px;
+}
+
+.topbar,
+.hero-band,
+.dashboard-panel,
+.entry-panel,
+.brand-section,
+.stock-check-panel,
+.order-card,
+.entity-card,
+.editor-panel,
+.empty-state {
+  padding: 8px;
+}
+
+.topbar h1 {
+  font-size: 1.25rem;
+}
+
+.hero-band h2,
+.section-head h2,
+.compact-head h2 {
+  font-size: 0.95rem;
+  line-height: 1.12;
+}
+
+.eyebrow,
+label span,
+.quick-stock > span,
+.supplier-field span,
+.buy-field span,
+.search-field span,
+.po-cost span,
+.confirmed-money span,
+.order-summary-metrics span,
+.today-summary p,
+.metric-card p,
+.summary-card p {
+  font-size: 0.68rem;
+}
+
+.date-pill,
+.cloud-badge span,
+.product-title span,
+.stock-check-meta,
+.dashboard-row span,
+.entity-card p,
+.entity-card span,
+.notes {
+  font-size: 0.72rem;
+}
+
+.cloud-badge {
+  min-width: 104px;
+  padding: 5px 7px;
+}
+
+.cloud-badge strong {
+  font-size: 0.66rem;
+}
+
+.product-title strong,
+.dashboard-row strong,
+.order-card h3,
+.entity-card h3,
+.stock-check-topline .product-title strong {
+  font-size: 0.86rem;
+}
+
+input,
+select,
+textarea,
+.search-field input,
+.brand-chooser select,
+.stock-check-panel .brand-chooser select {
+  min-height: 34px;
+  padding-inline: 7px;
+  font-size: 0.84rem;
+}
+
+textarea {
+  min-height: 70px;
+  padding-block: 8px;
+}
+
+.glow-button,
+.ghost-button,
+.danger-button,
+.install-button,
+.tabs button,
+.sub-tabs button,
+.brand-section-head .ghost-button,
+.brand-product-row .glow-button,
+.brand-product-row .ghost-button,
+.stock-check-topline .glow-button,
+.po-actions .ghost-button,
+.po-actions .glow-button {
+  min-height: 32px;
+  padding-inline: 9px;
+  font-size: 0.74rem;
+}
+
+.tabs {
+  gap: 5px;
+  margin: 8px 0 10px;
+  padding: 5px;
+}
+
+.tabs button {
+  min-height: 34px;
+}
+
+.sub-tabs {
+  gap: 5px;
+  padding: 5px;
+}
+
+.metric-grid,
+.summary-grid {
+  gap: 6px;
+}
+
+.metric-card,
+.summary-card {
+  min-height: 78px;
+  gap: 4px;
+  padding: 8px;
+}
+
+.metric-card strong {
+  font-size: clamp(1.65rem, 8vw, 3rem);
+}
+
+.summary-card strong,
+.today-summary strong {
+  font-size: clamp(1.35rem, 7vw, 2.3rem);
+}
+
+.dashboard-row {
+  padding: 7px 8px;
+}
+
+.today-summary {
+  gap: 6px;
+}
+
+.today-summary div {
+  padding: 8px;
+}
+
+.stock-check-row,
+.brand-product-row,
+.confirmed-row,
+.receive-row,
+.stock-row {
+  gap: 5px;
+  padding: 7px;
+}
+
+.stock-check-topline {
+  grid-template-columns: minmax(0, 1fr) auto 42px;
+  gap: 5px;
+}
+
+.stock-check-total {
+  font-size: 0.74rem;
+}
+
+.stock-check-topline .glow-button {
+  min-height: 28px;
+  padding-inline: 6px;
+}
+
+.stock-area-inputs,
+.row-actions,
+.po-bulk-actions,
+.editor-panel,
+.order-summary-metrics {
+  gap: 5px;
+}
+
+.stock-check-row input,
+.brand-product-row input,
+.confirmed-row input,
+.confirmed-row select,
+.receive-row input {
+  min-height: 32px;
+  font-size: 0.86rem;
+}
+
+.stock-area-inputs label span {
+  font-size: 0.6rem;
+}
+
+.brand-product-row {
+  grid-template-columns: minmax(0, 1fr) 86px;
+}
+
+.po-cost,
+.confirmed-money,
+.mini-stat,
+.order-summary-metrics div {
+  min-height: 40px;
+  padding: 6px 7px;
+}
+
+.mini-stat strong {
+  font-size: 1rem;
+}
+
+.po-cost strong,
+.confirmed-money strong,
+.dashboard-row b,
+.order-summary-metrics strong {
+  font-size: 0.86rem;
+}
+
+.confirmed-badge,
+.success-badge {
+  padding: 4px 7px;
+  font-size: 0.64rem;
+}
+
+.po-bulk-actions {
+  padding: 6px;
+}
+
+.sticky-action {
+  gap: 8px;
+  padding: 7px;
+}
+
+.sticky-action span {
+  font-size: 0.7rem;
+}
+
+.sticky-action strong {
+  font-size: 0.95rem;
+}
+
+.order-summary-card {
+  gap: 8px;
+}
+
+.order-card-actions {
+  gap: 5px;
+}
+
+.editor-panel {
+  padding: 8px;
+}
+
+.form-actions {
+  gap: 8px;
+}
+
+.po-preview {
+  padding: 12px;
+}
+
+.po-preview h2 {
+  font-size: 1.2rem;
+}
+
+.po-preview h3 {
+  font-size: 0.9rem;
+}
+
+.po-meta,
+.po-preview table,
+.po-notes {
+  font-size: 0.76rem;
+}
+
+.po-preview th,
+.po-preview td {
+  padding: 6px 5px;
+}
+
+@media (max-width: 720px) {
+  .app-shell {
+    padding-top: calc(8px + env(safe-area-inset-top));
+    padding-bottom: calc(150px + env(safe-area-inset-bottom));
+  }
+
+  .topbar {
+    padding: 8px;
+  }
+
+  .tabs {
+    right: max(8px, env(safe-area-inset-right));
+    bottom: calc(6px + env(safe-area-inset-bottom));
+    left: max(8px, env(safe-area-inset-left));
+  }
+
+  .tabs button {
+    min-height: 30px;
+    padding-inline: 3px;
+    font-size: 0.66rem;
+  }
+
+  .sticky-action {
+    bottom: calc(52px + env(safe-area-inset-bottom));
+  }
+
+  .with-sticky {
+    padding-bottom: 120px;
+  }
+
+  .stock-area-inputs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .brand-product-row {
+    grid-template-columns: minmax(0, 1fr) 78px;
+  }
+}
+
+@media (min-width: 640px) {
+  .brand-product-row {
+    grid-template-columns: minmax(180px, 1fr) 96px 84px;
+  }
+
+  .confirmed-row {
+    grid-template-columns: minmax(160px, 1fr) 70px 120px auto;
+  }
+}
