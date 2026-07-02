@@ -84,6 +84,37 @@ button {
   gap: 8px;
 }
 
+.cloud-badge {
+  display: grid;
+  gap: 2px;
+  min-width: 118px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 176, 106, 0.18);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+  text-align: right;
+}
+
+.cloud-badge strong,
+.cloud-badge span {
+  display: block;
+  line-height: 1.05;
+}
+
+.cloud-badge strong {
+  color: #a6ffc7;
+  font-size: 0.72rem;
+}
+
+.cloud-badge.offline strong {
+  color: #ffbd6a;
+}
+
+.cloud-badge span {
+  color: #cab4a4;
+  font-size: 0.64rem;
+}
+
 .install-button {
   min-height: 36px;
   padding: 0 11px;

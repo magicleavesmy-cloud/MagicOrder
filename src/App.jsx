@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
+import {
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  writeBatch,
+} from 'firebase/firestore'
 import './App.css'
-
-const STORAGE_KEY = 'magicorder:v1'
+import { db } from './firebase'
 
 const todayKey = () => new Date().toISOString().slice(0, 10)
 const money = (value) => `RM ${Number(value || 0).toFixed(2)}`
@@ -9,135 +19,72 @@ const numberValue = (value) => Math.max(0, Number(value) || 0)
 const makeId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 const PRODUCT_TYPE_OPTIONS = ['Red', 'Blue', 'Black Menthol', 'Ice Blast']
 const productDisplayName = (product) => `${product.brand || ''} ${product.flavour || ''}`.trim() || product.name
-
-const sampleSuppliers = [
-  {
-    id: 'sup-golden',
-    name: 'Golden Leaf Trading',
-    phone: '03-2148 1020',
-    notes: 'Main supplier for premium brands. Morning delivery.',
-    brands: 'Marlboro, Dunhill, Mevius',
-  },
-  {
-    id: 'sup-suria',
-    name: 'Suria Tobacco Supply',
-    phone: '012-782 4431',
-    notes: 'Good fallback for menthol stock.',
-    brands: 'Winston, L.A., Sampoerna',
-  },
-  {
-    id: 'sup-borneo',
-    name: 'Borneo Smoke Wholesale',
-    phone: '088-412 900',
-    notes: 'Weekly price confirmation required.',
-    brands: 'Camel, Rothmans, Benson',
-  },
-]
-
-const sampleProducts = [
-  {
-    id: 'prd-marlboro-red',
-    name: 'Marlboro Red',
-    brand: 'Marlboro',
-    flavour: 'Red',
-    keepStockQty: 120,
-    defaultSupplierId: 'sup-golden',
-    defaultBuyingPrice: 17.2,
-    barcode: '9556570000012',
-    active: true,
-  },
-  {
-    id: 'prd-marlboro-gold',
-    name: 'Marlboro Gold',
-    brand: 'Marlboro',
-    flavour: 'Gold',
-    keepStockQty: 90,
-    defaultSupplierId: 'sup-golden',
-    defaultBuyingPrice: 17.2,
-    barcode: '9556570000029',
-    active: true,
-  },
-  {
-    id: 'prd-dunhill-blue',
-    name: 'Dunhill Blue',
-    brand: 'Dunhill',
-    flavour: 'Blue',
-    keepStockQty: 100,
-    defaultSupplierId: 'sup-golden',
-    defaultBuyingPrice: 17.5,
-    barcode: '',
-    active: true,
-  },
-  {
-    id: 'prd-winston-red',
-    name: 'Winston Red',
-    brand: 'Winston',
-    flavour: 'Classic',
-    keepStockQty: 80,
-    defaultSupplierId: 'sup-suria',
-    defaultBuyingPrice: 15.9,
-    barcode: '',
-    active: true,
-  },
-  {
-    id: 'prd-la-menthol',
-    name: 'L.A. Menthol',
-    brand: 'L.A.',
-    flavour: 'Menthol',
-    keepStockQty: 70,
-    defaultSupplierId: 'sup-suria',
-    defaultBuyingPrice: 14.8,
-    barcode: '',
-    active: true,
-  },
-  {
-    id: 'prd-camel-purple',
-    name: 'Camel Purple',
-    brand: 'Camel',
-    flavour: 'Purple Mint',
-    keepStockQty: 60,
-    defaultSupplierId: 'sup-borneo',
-    defaultBuyingPrice: 16.4,
-    barcode: '',
-    active: true,
-  },
-]
+const syncTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const dateKeyFrom = (value) => {
+  if (!value) return ''
+  if (typeof value === 'string') return value.slice(0, 10)
+  if (typeof value.toDate === 'function') return value.toDate().toISOString().slice(0, 10)
+  return ''
+}
 
 const createInitialState = () => ({
-  products: sampleProducts,
-  suppliers: sampleSuppliers,
+  products: [],
+  suppliers: [],
   checks: {},
   stockChecks: [],
   orders: [],
-  duitStock: sampleProducts.reduce((stock, product) => {
-    stock[product.id] = { qty: 0, value: 0 }
-    return stock
-  }, {}),
 })
 
-const loadState = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? { ...createInitialState(), ...JSON.parse(raw) } : createInitialState()
-  } catch {
-    return createInitialState()
-  }
-}
-
 function App() {
-  const [data, setData] = useState(loadState)
+  const [data, setData] = useState(createInitialState)
   const [page, setPage] = useState('dashboard')
   const [settingsTab, setSettingsTab] = useState('orders')
   const [receivingOrderId, setReceivingOrderId] = useState(null)
   const [syncNotice, setSyncNotice] = useState('')
+  const [cloudSync, setCloudSync] = useState({ enabled: false, lastSynced: '', error: '' })
   const [installPrompt, setInstallPrompt] = useState(null)
   const [editingProduct, setEditingProduct] = useState(null)
   const [editingSupplier, setEditingSupplier] = useState(null)
   const currentDay = todayKey()
 
+  const markSynced = () => setCloudSync({ enabled: true, lastSynced: syncTime(), error: '' })
+  const markSyncError = (error) => setCloudSync({ enabled: false, lastSynced: '', error: error.message })
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-  }, [data])
+    const productsQuery = query(collection(db, 'products'), orderBy('name'))
+    const suppliersQuery = query(collection(db, 'suppliers'), orderBy('name'))
+    const ordersQuery = query(collection(db, 'purchaseOrders'), orderBy('createdAt', 'desc'))
+
+    const unsubProducts = onSnapshot(productsQuery, (snapshot) => {
+      setData((current) => ({
+        ...current,
+        products: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })),
+      }))
+      markSynced()
+    }, markSyncError)
+
+    const unsubSuppliers = onSnapshot(suppliersQuery, (snapshot) => {
+      setData((current) => ({
+        ...current,
+        suppliers: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })),
+      }))
+      markSynced()
+    }, markSyncError)
+
+    const unsubOrders = onSnapshot(ordersQuery, (snapshot) => {
+      setData((current) => ({
+        ...current,
+        orders: snapshot.docs.map((item) => ({ id: item.id, ...item.data() })),
+      }))
+      markSynced()
+    }, markSyncError)
+
+    return () => {
+      unsubProducts()
+      unsubSuppliers()
+      unsubOrders()
+    }
+  }, [])
 
   useEffect(() => {
     if (!syncNotice) return undefined
@@ -170,11 +117,24 @@ function App() {
   const todayDraft = useMemo(() => data.checks[currentDay] || {}, [currentDay, data.checks])
   const upcomingOrders = data.orders.filter((order) => order.status === 'upcoming')
   const receivedTodayOrders = data.orders.filter(
-    (order) => order.status === 'closed' && order.receivedAt?.slice(0, 10) === currentDay,
+    (order) => order.status === 'closed' && dateKeyFrom(order.receivedAt) === currentDay,
+  )
+  const duitStock = useMemo(
+    () =>
+      Object.fromEntries(
+        data.products.map((product) => [
+          product.id,
+          {
+            qty: numberValue(product.currentStock),
+            value: numberValue(product.currentStock) * numberValue(product.defaultBuyingPrice),
+          },
+        ]),
+      ),
+    [data.products],
   )
 
   const stats = useMemo(() => {
-    const todayOrders = data.orders.filter((order) => order.createdAt.slice(0, 10) === currentDay)
+    const todayOrders = data.orders.filter((order) => dateKeyFrom(order.createdAt) === currentDay)
     const checkedProducts = Object.values(todayDraft).filter((row) => row.confirmed).length
     const orderQty = todayOrders.reduce(
       (sum, order) => sum + order.items.reduce((itemSum, item) => itemSum + item.finalOrderQty, 0),
@@ -234,7 +194,7 @@ function App() {
     })
   }
 
-  const createSupplierOrders = ({ stayOnPage = false } = {}) => {
+  const createSupplierOrders = async ({ stayOnPage = false } = {}) => {
     const grouped = data.products.reduce((groups, product) => {
       const row = todayDraft[product.id]
       const finalOrderQty = numberValue(row?.finalOrderQty)
@@ -266,7 +226,24 @@ function App() {
     }))
 
     if (!orders.length) return []
-    setData((current) => ({ ...current, orders: [...orders, ...current.orders] }))
+    await Promise.all(
+      orders.map((order) =>
+        setDoc(doc(db, 'purchaseOrders', order.id), {
+          ...order,
+          supplier: {
+            id: order.supplierId,
+            name: order.supplierName,
+          },
+          products: order.items.map((item) => ({
+            productId: item.productId,
+            productName: item.productName,
+            qty: item.finalOrderQty,
+          })),
+          syncedAt: serverTimestamp(),
+        }),
+      ),
+    )
+    setSyncNotice('Purchase order synced')
     if (!stayOnPage) {
       setSettingsTab('orders')
       setPage('settings')
@@ -274,112 +251,107 @@ function App() {
     return orders
   }
 
-  const confirmReceive = (orderId, receivedRows) => {
-    setData((current) => {
-      const nextStock = { ...current.duitStock }
-      const nextOrders = current.orders.map((order) => {
-        if (order.id !== orderId) return order
-        const items = order.items.map((item) => {
-          const receivedQty = numberValue(receivedRows[item.productId])
-          const currentStock = nextStock[item.productId] || { qty: 0, value: 0 }
-          nextStock[item.productId] = {
-            qty: currentStock.qty + receivedQty,
-            value: currentStock.value + receivedQty * item.buyingPrice,
-          }
-          return { ...item, receivedQty }
-        })
-        return { ...order, items, status: 'closed', receivedAt: new Date().toISOString() }
-      })
-      return { ...current, orders: nextOrders, duitStock: nextStock }
+  const confirmReceive = async (orderId, receivedRows) => {
+    const order = data.orders.find((item) => item.id === orderId)
+    if (!order) return
+    const receivedAt = new Date().toISOString()
+    const batch = writeBatch(db)
+    const items = order.items.map((item) => {
+      const receivedQty = numberValue(receivedRows[item.productId])
+      const product = productById[item.productId]
+      const currentStock = numberValue(product?.currentStock)
+      batch.set(
+        doc(db, 'products', item.productId),
+        { currentStock: currentStock + receivedQty, updatedAt: serverTimestamp() },
+        { merge: true },
+      )
+      return { ...item, receivedQty }
     })
+
+    batch.set(doc(db, 'purchaseOrders', orderId), {
+      ...order,
+      items,
+      status: 'closed',
+      receivedAt,
+      updatedAt: serverTimestamp(),
+    })
+    batch.set(doc(collection(db, 'receiveHistory')), {
+      orderId,
+      supplierId: order.supplierId,
+      supplierName: order.supplierName,
+      items,
+      receivedAt,
+      createdAt: serverTimestamp(),
+    })
+    await batch.commit()
     setSyncNotice('Synced to DuitStock')
     setReceivingOrderId(null)
     setSettingsTab('orders')
     setPage('settings')
   }
 
-  const saveStockCheckRecords = (records) => {
+  const saveStockCheckRecords = async (records) => {
     if (!records.length) return
-    setData((current) => {
-      const checkedAt = new Date().toISOString()
-      const nextStock = { ...current.duitStock }
-      const nextProducts = current.products.map((product) => {
-        const record = records.find((item) => item.productId === product.id)
-        if (!record) return product
-        const previousStock = nextStock[product.id] || { qty: 0, value: 0 }
-        nextStock[product.id] = { ...previousStock, qty: record.totalQty }
-        return { ...product, currentStock: record.totalQty }
+    const checkedAt = new Date().toISOString()
+    const batch = writeBatch(db)
+    records.forEach((record) => {
+      batch.set(doc(collection(db, 'stockChecks')), {
+        ...record,
+        checkedAt,
+        createdAt: serverTimestamp(),
       })
-      const stockChecks = [
-        ...records.map((record) => ({
-          ...record,
-          id: makeId('stk'),
-          checkedAt,
-        })),
-        ...(current.stockChecks || []),
-      ]
-      return { ...current, products: nextProducts, duitStock: nextStock, stockChecks }
+      batch.set(
+        doc(db, 'products', record.productId),
+        { currentStock: record.totalQty, updatedAt: serverTimestamp() },
+        { merge: true },
+      )
     })
+    await batch.commit()
+    setSyncNotice('Stock check synced')
   }
 
-  const saveProduct = (form) => {
-    setData((current) => {
-      const isEditing = Boolean(form.id)
-      const productId = form.id || makeId('prd')
-      const brand = form.brand.trim()
-      const type = form.flavour.trim()
-      const currentStock = numberValue(form.currentStock)
-      const product = {
-        ...form,
-        id: productId,
-        name: `${brand} ${type}`.trim(),
-        brand,
-        flavour: type,
-        keepStockQty: numberValue(form.keepStockQty),
-        defaultBuyingPrice: numberValue(form.costPrice ?? form.defaultBuyingPrice),
-        defaultSupplierId: form.defaultSupplierId || current.suppliers[0]?.id || '',
-        barcode: form.barcode || '',
-        active: true,
-      }
-      const products = isEditing
-        ? current.products.map((item) => (item.id === product.id ? product : item))
-        : [product, ...current.products]
-      const previousStock = current.duitStock[productId] || { qty: 0, value: 0 }
-      return {
-        ...current,
-        products,
-        duitStock: {
-          ...current.duitStock,
-          [productId]: { ...previousStock, qty: currentStock },
-        },
-      }
-    })
+  const saveProduct = async (form) => {
+    const productId = form.id || makeId('prd')
+    const brand = form.brand.trim()
+    const type = form.flavour.trim()
+    const product = {
+      ...form,
+      id: productId,
+      name: `${brand} ${type}`.trim(),
+      brand,
+      flavour: type,
+      keepStockQty: numberValue(form.keepStockQty),
+      currentStock: numberValue(form.currentStock),
+      defaultBuyingPrice: numberValue(form.costPrice ?? form.defaultBuyingPrice),
+      defaultSupplierId: form.defaultSupplierId || data.suppliers[0]?.id || '',
+      barcode: form.barcode || '',
+      active: true,
+      updatedAt: serverTimestamp(),
+    }
+    await setDoc(doc(db, 'products', productId), product, { merge: true })
+    setSyncNotice('Product synced')
     setEditingProduct(null)
   }
 
-  const deleteProduct = (productId) => {
-    setData((current) => ({
-      ...current,
-      products: current.products.filter((product) => product.id !== productId),
-    }))
+  const deleteProduct = async (productId) => {
+    await deleteDoc(doc(db, 'products', productId))
+    setSyncNotice('Product deleted')
   }
 
-  const saveSupplier = (form) => {
-    setData((current) => {
-      const supplier = { ...form }
-      const suppliers = supplier.id
-        ? current.suppliers.map((item) => (item.id === supplier.id ? supplier : item))
-        : [{ ...supplier, id: makeId('sup') }, ...current.suppliers]
-      return { ...current, suppliers }
-    })
+  const saveSupplier = async (form) => {
+    const supplierId = form.id || makeId('sup')
+    await setDoc(doc(db, 'suppliers', supplierId), {
+      ...form,
+      id: supplierId,
+      updatedAt: serverTimestamp(),
+    }, { merge: true })
+    setSyncNotice('Supplier synced')
     setEditingSupplier(null)
   }
 
-  const deleteSupplier = (supplierId) => {
-    setData((current) => ({
-      ...current,
-      suppliers: current.suppliers.filter((supplier) => supplier.id !== supplierId),
-    }))
+  const deleteSupplier = async (supplierId) => {
+    await deleteDoc(doc(db, 'suppliers', supplierId))
+    setSyncNotice('Supplier deleted')
   }
 
   const openReceive = (orderId) => {
@@ -396,6 +368,10 @@ function App() {
             <h1>MagicOrder</h1>
           </div>
           <div className="topbar-actions">
+            <div className={`cloud-badge ${cloudSync.enabled ? 'online' : 'offline'}`}>
+              <strong>{cloudSync.enabled ? 'Cloud Sync ON' : 'Cloud Sync OFF'}</strong>
+              <span>{cloudSync.enabled ? `Last synced ${cloudSync.lastSynced}` : cloudSync.error || 'Connecting...'}</span>
+            </div>
             {installPrompt ? (
               <button className="install-button" onClick={installApp}>Install App</button>
             ) : null}
@@ -421,7 +397,7 @@ function App() {
             <Dashboard
               stats={stats}
               orders={data.orders}
-              duitStock={data.duitStock}
+              duitStock={duitStock}
               products={data.products}
               onGoCheck={() => setPage('check')}
             />
@@ -430,7 +406,7 @@ function App() {
           {page === 'stock' && (
             <StockCheckPage
               products={data.products}
-              duitStock={data.duitStock}
+              duitStock={duitStock}
               onSaveStockChecks={saveStockCheckRecords}
             />
           )}
@@ -439,7 +415,7 @@ function App() {
             <PurchaseOrderPage
               products={data.products}
               suppliers={data.suppliers}
-              duitStock={data.duitStock}
+              duitStock={duitStock}
               draft={todayDraft}
               onRowChange={updateTodayRow}
               onCreateOrders={createSupplierOrders}
@@ -467,7 +443,7 @@ function App() {
               syncNotice={syncNotice}
               products={data.products}
               suppliers={data.suppliers}
-              duitStock={data.duitStock}
+              duitStock={duitStock}
               editingProduct={editingProduct}
               onEditProduct={setEditingProduct}
               onSaveProduct={saveProduct}
@@ -702,9 +678,9 @@ function StockCheckPage({ products, duitStock, onSaveStockChecks }) {
     }
   }
 
-  const confirmProduct = (product) => {
+  const confirmProduct = async (product) => {
     const record = buildRecord(product)
-    onSaveStockChecks([record])
+    await onSaveStockChecks([record])
     setCheckedProducts((current) => ({ ...current, [product.id]: true }))
     setSuccessMessage(`${productDisplayName(product)} checked`)
   }
@@ -712,10 +688,10 @@ function StockCheckPage({ products, duitStock, onSaveStockChecks }) {
   const enteredProducts = products.filter((product) => hasEnteredRow(product.id))
   const summaryQty = enteredProducts.reduce((sum, product) => sum + getAreaTotal(product.id), 0)
 
-  const saveAllChecked = () => {
+  const saveAllChecked = async () => {
     const records = enteredProducts.map(buildRecord)
     if (!records.length) return
-    onSaveStockChecks(records)
+    await onSaveStockChecks(records)
     setCheckedProducts((current) => ({
       ...current,
       ...Object.fromEntries(records.map((record) => [record.productId, true])),
@@ -913,8 +889,8 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
     })
   }
 
-  const createPurchaseOrders = () => {
-    const createdOrders = onCreateOrders({ stayOnPage: true })
+  const createPurchaseOrders = async () => {
+    const createdOrders = await onCreateOrders({ stayOnPage: true })
     const selectedSupplierOrder = createdOrders.find((order) => order.supplierId === selectedSupplierId)
     if (selectedSupplierOrder) setPreviewOrder(selectedSupplierOrder)
   }
