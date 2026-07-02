@@ -130,6 +130,7 @@ function App() {
   const [settingsTab, setSettingsTab] = useState('orders')
   const [receivingOrderId, setReceivingOrderId] = useState(null)
   const [syncNotice, setSyncNotice] = useState('')
+  const [installPrompt, setInstallPrompt] = useState(null)
   const [editingProduct, setEditingProduct] = useState(null)
   const [editingSupplier, setEditingSupplier] = useState(null)
   const currentDay = todayKey()
@@ -143,6 +144,28 @@ function App() {
     const timer = window.setTimeout(() => setSyncNotice(''), 4000)
     return () => window.clearTimeout(timer)
   }, [syncNotice])
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event) => {
+      event.preventDefault()
+      setInstallPrompt(event)
+    }
+    const handleInstalled = () => setInstallPrompt(null)
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+    window.addEventListener('appinstalled', handleInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('appinstalled', handleInstalled)
+    }
+  }, [])
+
+  const installApp = async () => {
+    if (!installPrompt) return
+    installPrompt.prompt()
+    await installPrompt.userChoice
+    setInstallPrompt(null)
+  }
 
   const todayDraft = useMemo(() => data.checks[currentDay] || {}, [currentDay, data.checks])
   const upcomingOrders = data.orders.filter((order) => order.status === 'upcoming')
@@ -372,7 +395,12 @@ function App() {
             <p className="eyebrow">Internal replenishment</p>
             <h1>MagicOrder</h1>
           </div>
-          <div className="date-pill">{currentDay}</div>
+          <div className="topbar-actions">
+            {installPrompt ? (
+              <button className="install-button" onClick={installApp}>Install App</button>
+            ) : null}
+            <div className="date-pill">{currentDay}</div>
+          </div>
         </header>
 
         <nav className="tabs" aria-label="Main navigation">
