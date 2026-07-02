@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   collection,
   deleteDoc,
@@ -18,7 +18,6 @@ const money = (value) => `RM ${Number(value || 0).toFixed(2)}`
 const costMoney = (value) => `RM ${Number(value || 0).toFixed(3)}`
 const numberValue = (value) => Math.max(0, Number(value) || 0)
 const makeId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-const PRODUCT_TYPE_OPTIONS = ['Red', 'Blue', 'Black Menthol', 'Ice Blast']
 const productDisplayName = (product) => `${product.brand || ''} ${product.flavour || ''}`.trim() || product.name
 const syncTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 const dateKeyFrom = (value) => {
@@ -324,14 +323,34 @@ function App() {
       keepStockQty: numberValue(form.keepStockQty),
       currentStock: numberValue(form.currentStock),
       defaultBuyingPrice: numberValue(form.costPrice ?? form.defaultBuyingPrice),
+      sellingPrice: numberValue(form.sellingPrice),
       defaultSupplierId: form.defaultSupplierId || data.suppliers[0]?.id || '',
       barcode: form.barcode || '',
       active: true,
       updatedAt: serverTimestamp(),
     }
     await setDoc(doc(db, 'products', productId), product, { merge: true })
+
+    const brandKey = brand.toLowerCase()
+    const siblingProducts = data.products.filter(
+      (existing) => existing.id !== productId && (existing.brand || '').trim().toLowerCase() === brandKey,
+    )
+    if (siblingProducts.length) {
+      const priceBatch = writeBatch(db)
+      siblingProducts.forEach((existing) => {
+        priceBatch.set(
+          doc(db, 'products', existing.id),
+          { sellingPrice: numberValue(form.sellingPrice), updatedAt: serverTimestamp() },
+          { merge: true },
+        )
+      })
+      await priceBatch.commit()
+    }
+
     setSyncNotice('Product synced')
-    setEditingProduct(null)
+    if (form.id) {
+      setEditingProduct(null)
+    }
   }
 
   const deleteProduct = async (productId) => {
@@ -808,9 +827,22 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
   const [previewOrder, setPreviewOrder] = useState(null)
 
   const confirmedProducts = products.filter((product) => draft[product.id]?.confirmed)
+  const selectedSupplier = useMemo(
+    () => suppliers.find((supplier) => supplier.id === selectedSupplierId) || null,
+    [suppliers, selectedSupplierId],
+  )
+  const supplierBrandNames = useMemo(
+    () => (selectedSupplier?.brands || '').split(',').map((brand) => brand.trim()).filter(Boolean),
+    [selectedSupplier],
+  )
   const supplierProducts = useMemo(
-    () => products.filter((product) => !selectedSupplierId || product.defaultSupplierId === selectedSupplierId),
-    [products, selectedSupplierId],
+    () =>
+      selectedSupplierId
+        ? products.filter((product) =>
+            supplierBrandNames.some((brand) => brand.toLowerCase() === product.brand?.trim().toLowerCase()),
+          )
+        : [],
+    [products, selectedSupplierId, supplierBrandNames],
   )
   const supplierBrands = useMemo(
     () =>
@@ -923,23 +955,25 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
           </select>
         </label>
 
-        {selectedSupplierId ? (
-          <label className="search-field brand-chooser">
-            <span>Brand</span>
-            <select
-              value={selectedBrand}
-              onChange={(event) => {
-                setSelectedBrand(event.target.value)
-                triggerAutoFillHighlight(event.target.value)
-              }}
-            >
-              <option value="">Choose brand</option>
-              {supplierBrands.map((brand) => (
-                <option key={brand} value={brand}>{brand}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+        <label className="search-field brand-chooser">
+          <span>Brand</span>
+          <select
+            value={selectedBrand}
+            disabled={!selectedSupplierId}
+            onChange={(event) => {
+              setSelectedBrand(event.target.value)
+              triggerAutoFillHighlight(event.target.value)
+            }}
+          >
+            <option value="">Choose brand</option>
+            {supplierBrands.map((brand) => (
+              <option key={brand} value={brand}>{brand}</option>
+            ))}
+          </select>
+          {selectedSupplierId && supplierBrands.length === 0 ? (
+            <small className="field-hint">No brands linked to this supplier</small>
+          ) : null}
+        </label>
 
         {selectedSupplierId && selectedBrand ? (
           <section className="brand-section">
@@ -1445,22 +1479,132 @@ function ReceiveOrder({ order, onConfirm, onBack }) {
 
 function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, onSave, onDelete }) {
   const [expandedBrand, setExpandedBrand] = useState('')
+  const [importPreview, setImportPreview] = useState(null)
+  const [importFileError, setImportFileError] = useState('')
+  const [importBusy, setImportBusy] = useState(false)
+  const fileInputRef = useRef(null)
+
+  const exportProductsCsv = () => {
+    const rows = [...products].sort(
+      (a, b) => (a.brand || '').localeCompare(b.brand || '') || (a.flavour || '').localeCompare(b.flavour || ''),
+    )
+    const header = 'id,brand,flavour,currentStock,defaultStock,costPrice,sellingPrice'
+    const lines = rows.map((p) =>
+      [
+        p.id,
+        p.brand || '',
+        p.flavour || '',
+        numberValue(duitStock[p.id]?.qty ?? p.currentStock),
+        numberValue(p.keepStockQty),
+        numberValue(p.defaultBuyingPrice),
+        numberValue(p.sellingPrice),
+      ].join(','),
+    )
+    const csv = [header, ...lines].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `magicorder-products-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const parseCsvText = (text) => {
+    const lines = text.trim().split(/\r?\n/)
+    const header = lines[0].split(',').map((h) => h.trim())
+    return lines.slice(1).filter(Boolean).map((line) => {
+      const cells = line.split(',')
+      const row = {}
+      header.forEach((key, i) => { row[key] = (cells[i] ?? '').trim() })
+      return row
+    })
+  }
+
+  const handleImportFileChange = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setImportFileError('')
+    try {
+      const text = await file.text()
+      const rows = parseCsvText(text)
+      const productMap = Object.fromEntries(products.map((p) => [p.id, p]))
+      const changes = []
+      const skipped = []
+      rows.forEach((row) => {
+        const existing = productMap[row.id]
+        if (!existing) {
+          skipped.push(`${row.brand || ''} ${row.flavour || ''} (id ${row.id || 'missing'} not found)`.trim())
+          return
+        }
+        const newDefaultStock = numberValue(row.defaultStock)
+        const newCostPrice = numberValue(row.costPrice)
+        const newSellingPrice = numberValue(row.sellingPrice)
+        const stockChanged = numberValue(existing.keepStockQty) !== newDefaultStock
+        const costChanged = numberValue(existing.defaultBuyingPrice) !== newCostPrice
+        const sellingChanged = numberValue(existing.sellingPrice) !== newSellingPrice
+        if (stockChanged || costChanged || sellingChanged) {
+          changes.push({
+            id: row.id,
+            label: productDisplayName(existing),
+            fromDefaultStock: numberValue(existing.keepStockQty),
+            toDefaultStock: newDefaultStock,
+            fromCostPrice: numberValue(existing.defaultBuyingPrice),
+            toCostPrice: newCostPrice,
+            fromSellingPrice: numberValue(existing.sellingPrice),
+            toSellingPrice: newSellingPrice,
+          })
+        }
+      })
+      setImportPreview({ changes, skipped })
+    } catch (error) {
+      setImportFileError('Could not read that file. Make sure it is a CSV exported from this app.')
+    }
+  }
+
+  const applyImportChanges = async () => {
+    if (!importPreview?.changes.length) return
+    setImportBusy(true)
+    try {
+      const batchSize = 450
+      for (let i = 0; i < importPreview.changes.length; i += batchSize) {
+        const chunk = importPreview.changes.slice(i, i + batchSize)
+        const batch = writeBatch(db)
+        chunk.forEach((change) => {
+          batch.set(
+            doc(db, 'products', change.id),
+            {
+              keepStockQty: change.toDefaultStock,
+              defaultBuyingPrice: change.toCostPrice,
+              sellingPrice: change.toSellingPrice,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          )
+        })
+        await batch.commit()
+      }
+      setImportPreview(null)
+    } finally {
+      setImportBusy(false)
+    }
+  }
+
   const blankProduct = {
     id: '',
     name: '',
     brand: '',
     flavour: '',
-    keepStockQty: 0,
+    keepStockQty: 20,
     currentStock: 0,
     costPrice: 0,
+    sellingPrice: 0,
     defaultSupplierId: suppliers[0]?.id || '',
     defaultBuyingPrice: 0,
     barcode: '',
     active: true,
   }
-  const typeOptions = Array.from(
-    new Set([...PRODUCT_TYPE_OPTIONS, ...products.map((product) => product.flavour).filter(Boolean)]),
-  )
   const productsByBrand = useMemo(() => {
     const groups = products.reduce((collection, product) => {
       const brand = product.brand || 'Unbranded'
@@ -1483,7 +1627,13 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
           const qty = numberValue(duitStock[product.id]?.qty ?? product.currentStock)
           return sum + qty * numberValue(product.defaultBuyingPrice)
         }, 0)
-        return { brand, products: sortedProducts, totalStock, totalValue }
+        const brandSellingPrice = numberValue(sortedProducts[0]?.sellingPrice)
+        const totalMarginValue = sortedProducts.reduce((sum, product) => {
+          const qty = numberValue(duitStock[product.id]?.qty ?? product.currentStock)
+          const margin = brandSellingPrice - numberValue(product.defaultBuyingPrice)
+          return sum + qty * margin
+        }, 0)
+        return { brand, products: sortedProducts, totalStock, totalValue, sellingPrice: brandSellingPrice, totalMarginValue }
       })
   }, [duitStock, products])
 
@@ -1494,8 +1644,21 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
           <p className="eyebrow">Products</p>
           <h2>Stock master list</h2>
         </div>
-        <button className="glow-button compact" onClick={() => onEdit(blankProduct)}>Add</button>
+        <div className="products-header-actions">
+          <button className="ghost-button compact" onClick={exportProductsCsv}>Export CSV</button>
+          <button className="ghost-button compact" onClick={() => fileInputRef.current?.click()}>Import CSV</button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            style={{ display: 'none' }}
+            onChange={handleImportFileChange}
+          />
+          <button className="glow-button compact" onClick={() => onEdit(blankProduct)}>Add</button>
+        </div>
       </div>
+
+      {importFileError ? <div className="empty-state">{importFileError}</div> : null}
 
       {editingProduct && (
         <ProductForm
@@ -1504,15 +1667,67 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
             ...editingProduct,
             currentStock: duitStock[editingProduct.id]?.qty ?? editingProduct.currentStock ?? 0,
             costPrice: editingProduct.defaultBuyingPrice ?? editingProduct.costPrice ?? 0,
+            sellingPrice: editingProduct.sellingPrice ?? 0,
           }}
-          typeOptions={typeOptions}
           onSave={onSave}
           onCancel={() => onEdit(null)}
         />
       )}
 
+      {importPreview ? (
+        <div className="po-modal-backdrop" role="dialog" aria-modal="true" aria-label="Import preview">
+          <div className="po-modal">
+            <div className="po-preview">
+              <header>
+                <div>
+                  <h2>Import Preview</h2>
+                  <h3>{importPreview.changes.length} product(s) will change</h3>
+                </div>
+              </header>
+              {importPreview.changes.length === 0 ? (
+                <p>No changes detected — CSV matches current data.</p>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Default Stock</th>
+                      <th>Cost Price</th>
+                      <th>Selling Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importPreview.changes.map((change) => (
+                      <tr key={change.id}>
+                        <td>{change.label}</td>
+                        <td>{change.fromDefaultStock} {'->'} {change.toDefaultStock}</td>
+                        <td>{change.fromCostPrice} {'->'} {change.toCostPrice}</td>
+                        <td>{change.fromSellingPrice} {'->'} {change.toSellingPrice}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {importPreview.skipped.length > 0 ? (
+                <p className="po-notes">Skipped (not found): {importPreview.skipped.join(', ')}</p>
+              ) : null}
+            </div>
+            <div className="po-actions">
+              <button className="ghost-button" onClick={() => setImportPreview(null)} disabled={importBusy}>Cancel</button>
+              <button
+                className="glow-button compact"
+                onClick={applyImportChanges}
+                disabled={importBusy || importPreview.changes.length === 0}
+              >
+                {importBusy ? 'Applying...' : `Apply ${importPreview.changes.length} Change(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="brand-product-groups">
-        {productsByBrand.map(({ brand, products: brandProducts, totalStock, totalValue }) => {
+        {productsByBrand.map(({ brand, products: brandProducts, totalStock, totalValue, sellingPrice, totalMarginValue }) => {
           const isExpanded = expandedBrand === brand
           return (
             <section className="product-brand-group" key={brand}>
@@ -1533,6 +1748,10 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
                   <strong>{costMoney(totalValue)}</strong>
                 </span>
               </button>
+              <div className="product-brand-margin">
+                <span>Selling price: {costMoney(sellingPrice)}</span>
+                <span>Est. margin on hand: {costMoney(totalMarginValue)}</span>
+              </div>
 
               {isExpanded ? (
                 <div className="product-brand-details">
@@ -1541,7 +1760,7 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
                       <div className="product-title">
                         <strong>{productDisplayName(product)}</strong>
                         <span>{duitStock[product.id]?.qty || 0} pkt current / {product.keepStockQty} pkt default</span>
-                        <p>{costMoney(product.defaultBuyingPrice)} per packet</p>
+                        <p>{costMoney(product.defaultBuyingPrice)} cost | {costMoney(product.sellingPrice)} sell | {costMoney(numberValue(product.sellingPrice) - numberValue(product.defaultBuyingPrice))} margin</p>
                       </div>
                       <div className="entity-actions">
                         <button className="ghost-button" onClick={() => onEdit(product)}>Edit</button>
@@ -1559,18 +1778,18 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
   )
 }
 
-function ProductForm({ product, typeOptions, onSave, onCancel }) {
+function ProductForm({ product, onSave, onCancel }) {
   const [form, setForm] = useState(product)
-  const initialType = typeOptions.includes(product.flavour) ? product.flavour : 'Add new'
-  const [selectedType, setSelectedType] = useState(initialType)
-  const [newType, setNewType] = useState(initialType === 'Add new' ? product.flavour : '')
+  const flavourInputRef = useRef(null)
+  const isNewProduct = !product.id
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }))
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    onSave({
-      ...form,
-      flavour: selectedType === 'Add new' ? newType : selectedType,
-    })
+    await onSave(form)
+    if (isNewProduct) {
+      setForm((current) => ({ ...current, flavour: '', currentStock: 0, keepStockQty: 20 }))
+      flavourInputRef.current?.focus()
+    }
   }
 
   return (
@@ -1580,18 +1799,9 @@ function ProductForm({ product, typeOptions, onSave, onCancel }) {
         <input value={form.brand} onChange={(event) => update('brand', event.target.value)} placeholder="DUNHILL, MARLBORO" required />
       </label>
       <label>
-        <span>Type</span>
-        <select value={selectedType} onChange={(event) => setSelectedType(event.target.value)}>
-          <option value="Add new">Add new</option>
-          {typeOptions.map((type) => <option key={type} value={type}>{type}</option>)}
-        </select>
+        <span>Flavour / Type</span>
+        <input ref={flavourInputRef} value={form.flavour} onChange={(event) => update('flavour', event.target.value)} placeholder="Red, Blue, Black Menthol, Ice Blast, Classic" required />
       </label>
-      {selectedType === 'Add new' ? (
-        <label>
-          <span>New type</span>
-          <input value={newType} onChange={(event) => setNewType(event.target.value)} placeholder="Red, Blue, Black Menthol, Ice Blast" required />
-        </label>
-      ) : null}
       <div className="stock-price-row">
         <label>
           <span>Current stock</span>
@@ -1602,6 +1812,10 @@ function ProductForm({ product, typeOptions, onSave, onCancel }) {
           <input type="number" min="0" step="0.001" inputMode="decimal" value={form.costPrice ?? form.defaultBuyingPrice} onChange={(event) => update('costPrice', event.target.value)} placeholder="17.064" />
         </label>
       </div>
+      <label>
+        <span>Selling price (applies to all {form.brand || 'this brand'} flavours)</span>
+        <input type="number" min="0" step="0.01" inputMode="decimal" value={form.sellingPrice ?? 0} onChange={(event) => update('sellingPrice', event.target.value)} placeholder="25.00" />
+      </label>
       <label>
         <span>Default stock (packets)</span>
         <input type="number" min="0" inputMode="numeric" value={form.keepStockQty} onChange={(event) => update('keepStockQty', event.target.value)} placeholder="Packets" />

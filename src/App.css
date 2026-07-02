@@ -875,6 +875,16 @@ option {
   grid-column: 1 / -1;
 }
 
+.field-hint {
+  color: #cab4a4;
+  font-size: 0.72rem;
+}
+
+.search-field select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .quick-stock > span,
 .quick-stock label span,
 .supplier-field span,
@@ -2187,4 +2197,21 @@ textarea {
   .confirmed-row {
     grid-template-columns: minmax(160px, 1fr) 70px 120px auto;
   }
+}
+
+
+.products-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+
+.product-brand-margin {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 4px 8px 8px;
+  color: #cab4a4;
+  font-size: 0.72rem;
 }
