@@ -578,6 +578,33 @@ option {
   text-align: right;
 }
 
+.stock-unit-row {
+  display: grid;
+  gap: 6px;
+}
+
+.stock-unit-row > span {
+  color: #cab4a4;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.stock-unit-row > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stock-unit-row label {
+  display: grid;
+  gap: 4px;
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
 .entity-card {
   display: grid;
   gap: 12px;
@@ -1184,7 +1211,7 @@ option {
 }
 
 .receive-row {
-  grid-template-columns: minmax(0, 1fr) 80px 102px;
+  grid-template-columns: minmax(0, 1fr) 76px 96px;
   gap: 7px;
   padding: 8px;
 }
@@ -1284,7 +1311,7 @@ option {
 
   .receive-header {
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) 92px 120px 140px;
+    grid-template-columns: minmax(180px, 1fr) 92px 96px 140px;
     gap: 8px;
     padding: 0 10px;
     color: #cab4a4;
@@ -1294,7 +1321,7 @@ option {
   }
 
   .receive-row {
-    grid-template-columns: minmax(180px, 1fr) 92px 120px 140px;
+    grid-template-columns: minmax(180px, 1fr) 92px 96px 140px;
     align-items: end;
   }
 
@@ -1440,7 +1467,7 @@ option {
 
 .stock-area-inputs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -2178,10 +2205,6 @@ textarea {
 
   .with-sticky {
     padding-bottom: 120px;
-  }
-
-  .stock-area-inputs {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .brand-product-row {

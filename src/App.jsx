@@ -17,6 +17,13 @@ const todayKey = () => new Date().toISOString().slice(0, 10)
 const money = (value) => `RM ${Number(value || 0).toFixed(2)}`
 const costMoney = (value) => `RM ${Number(value || 0).toFixed(3)}`
 const numberValue = (value) => Math.max(0, Number(value) || 0)
+const formatCtnQty = (value = 0) => {
+  const qty = numberValue(value)
+  const formatted = Number.isInteger(qty) ? String(qty) : qty.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+  return `${formatted} CTN`
+}
+const formatOrderQty = formatCtnQty
+const roundUpCartons = (value = 0) => Math.ceil(numberValue(value))
 const makeId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
 const productDisplayName = (product) => `${product.brand || ''} ${product.flavour || ''}`.trim() || product.name
 const syncTime = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -197,7 +204,7 @@ function App() {
   const createSupplierOrders = async ({ stayOnPage = false } = {}) => {
     const grouped = data.products.reduce((groups, product) => {
       const row = todayDraft[product.id]
-      const finalOrderQty = numberValue(row?.finalOrderQty)
+      const finalOrderQty = roundUpCartons(row?.finalOrderQty)
       if (!row?.confirmed || finalOrderQty <= 0) return groups
       const supplierId = row.supplierId || product.defaultSupplierId
       groups[supplierId] ||= []
@@ -533,7 +540,7 @@ function Dashboard({ stats, orders, duitStock, products, onGoCheck }) {
     <section className="page-stack">
       <div className="hero-band">
         <div>
-          <p className="eyebrow">Packets only</p>
+          <p className="eyebrow">Carton stock</p>
           <h2>Supplier orders from physical stock checks.</h2>
         </div>
         <button className="glow-button" onClick={onGoCheck}>Start check</button>
@@ -541,8 +548,8 @@ function Dashboard({ stats, orders, duitStock, products, onGoCheck }) {
 
       <div className="summary-grid">
         <SummaryCard label="Total cost of stock" value={money(dashboard.totalStockCost)} />
-        <SummaryCard label="Total qty of cigarette" value={dashboard.totalStockQty} suffix="pkt" />
-        <SummaryCard label="Today's total order qty" value={stats.orderQty} suffix="pkt" />
+        <SummaryCard label="Total qty of cigarette" value={formatCtnQty(dashboard.totalStockQty)} />
+        <SummaryCard label="Today's total order qty" value={formatOrderQty(stats.orderQty)} />
         <SummaryCard label="Today's total order amount" value={money(stats.orderValue)} />
       </div>
 
@@ -551,7 +558,7 @@ function Dashboard({ stats, orders, duitStock, products, onGoCheck }) {
           <DashboardRow
             key={row.product.id}
             title={row.name}
-            left={`${row.currentQty} pkt current`}
+            left={`${formatCtnQty(row.currentQty)} current`}
             right={money(row.stockValue)}
           />
         ))}
@@ -562,8 +569,8 @@ function Dashboard({ stats, orders, duitStock, products, onGoCheck }) {
           <DashboardRow
             key={row.product.id}
             title={row.name}
-            left={`${row.currentQty} pkt current / ${row.defaultStock} pkt default`}
-            right={`${Math.max(0, row.defaultStock - row.currentQty)} pkt shortage`}
+            left={`${formatCtnQty(row.currentQty)} current / ${formatCtnQty(row.defaultStock)} default`}
+            right={`${formatCtnQty(Math.max(0, row.defaultStock - row.currentQty))} shortage`}
           />
         ))}
       </DashboardSection>
@@ -574,7 +581,7 @@ function Dashboard({ stats, orders, duitStock, products, onGoCheck }) {
             <DashboardRow
               key={row.product.id}
               title={row.name}
-              left={`${row.qty} pkt moved`}
+              left={`${formatCtnQty(row.qty)} moved`}
               right={money(row.value)}
             />
           ))
@@ -589,7 +596,7 @@ function Dashboard({ stats, orders, duitStock, products, onGoCheck }) {
             <DashboardRow
               key={row.product.id}
               title={row.name}
-              left={`${row.qty} pkt moved`}
+              left={`${formatCtnQty(row.qty)} moved`}
               right={money(row.value)}
             />
           ))
@@ -601,7 +608,7 @@ function Dashboard({ stats, orders, duitStock, products, onGoCheck }) {
       <DashboardSection title="Today's order summary">
         <div className="today-summary">
           <div>
-            <strong>{stats.orderQty}<span> pkt</span></strong>
+            <strong>{formatOrderQty(stats.orderQty)}</strong>
             <p>Today's total cigarette order qty</p>
           </div>
           <div>
@@ -677,11 +684,11 @@ function StockCheckPage({ products, duitStock, onSaveStockChecks }) {
   const getAreaRow = (productId) => areaRows[productId] || {}
   const getAreaTotal = (productId) => {
     const row = getAreaRow(productId)
-    return numberValue(row.displayQty) + numberValue(row.rackQty) + numberValue(row.storeQty)
+    return numberValue(row.rackCartons) + numberValue(row.storeCartons)
   }
   const hasEnteredRow = (productId) => {
     const row = getAreaRow(productId)
-    return ['displayQty', 'rackQty', 'storeQty'].some((field) => row[field] !== undefined && row[field] !== '')
+    return ['rackCartons', 'storeCartons'].some((field) => row[field] !== undefined && row[field] !== '')
   }
 
   const buildRecord = (product) => {
@@ -690,9 +697,8 @@ function StockCheckPage({ products, duitStock, onSaveStockChecks }) {
       productId: product.id,
       brand: product.brand,
       type: product.flavour,
-      displayQty: numberValue(row.displayQty),
-      rackQty: numberValue(row.rackQty),
-      storeQty: numberValue(row.storeQty),
+      rackQty: numberValue(row.rackCartons),
+      storeQty: numberValue(row.storeCartons),
       totalQty: getAreaTotal(product.id),
       defaultStock: numberValue(product.keepStockQty),
     }
@@ -759,43 +765,33 @@ function StockCheckPage({ products, duitStock, onSaveStockChecks }) {
                       <strong>{productDisplayName(product)}</strong>
                       {checkedProducts[product.id] ? <span className="confirmed-badge">Checked</span> : null}
                     </div>
-                    <strong className="stock-check-total">Total: {totalQty} pkt</strong>
+                    <strong className="stock-check-total">Total: {totalQty} CTN</strong>
                     <button className="glow-button compact" onClick={() => confirmProduct(product)}>
                       SC
                     </button>
                   </div>
                   <div className="stock-check-meta">
-                    Default: {product.keepStockQty} | Current: {currentQty}
+                    Default: {formatCtnQty(product.keepStockQty)} | Current: {formatCtnQty(currentQty)}
                   </div>
                   <div className="stock-area-inputs">
                     <label>
-                      <span>Display</span>
+                      <span>Rack CTN</span>
                       <input
                         type="number"
                         min="0"
                         inputMode="numeric"
-                        value={row.displayQty ?? ''}
-                        onChange={(event) => updateArea(product.id, 'displayQty', event.target.value)}
+                        value={row.rackCartons ?? ''}
+                        onChange={(event) => updateArea(product.id, 'rackCartons', event.target.value)}
                       />
                     </label>
                     <label>
-                      <span>Rack</span>
+                      <span>Store CTN</span>
                       <input
                         type="number"
                         min="0"
                         inputMode="numeric"
-                        value={row.rackQty ?? ''}
-                        onChange={(event) => updateArea(product.id, 'rackQty', event.target.value)}
-                      />
-                    </label>
-                    <label>
-                      <span>Store</span>
-                      <input
-                        type="number"
-                        min="0"
-                        inputMode="numeric"
-                        value={row.storeQty ?? ''}
-                        onChange={(event) => updateArea(product.id, 'storeQty', event.target.value)}
+                        value={row.storeCartons ?? ''}
+                        onChange={(event) => updateArea(product.id, 'storeCartons', event.target.value)}
                       />
                     </label>
                   </div>
@@ -811,7 +807,7 @@ function StockCheckPage({ products, duitStock, onSaveStockChecks }) {
       <div className="sticky-action">
         <div>
           <span>{enteredProducts.length} checked products</span>
-          <strong>{summaryQty} pkt counted</strong>
+          <strong>{summaryQty} CTN counted</strong>
         </div>
         <button className="glow-button" onClick={saveAllChecked}>Save All Checked</button>
       </div>
@@ -872,10 +868,7 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
 
   const getCurrentStock = (product) => numberValue(duitStock[product.id]?.qty ?? product.currentStock)
   const getNeededQty = (product) => Math.max(0, product.keepStockQty - getCurrentStock(product))
-  const getRoundedOrderQty = (product) => {
-    const neededQty = getNeededQty(product)
-    return neededQty > 0 ? Math.ceil(neededQty / 10) * 10 : 0
-  }
+  const getRoundedOrderQty = (product) => roundUpCartons(getNeededQty(product))
   const getOrderInput = (product) => {
     if (Object.prototype.hasOwnProperty.call(orderInputs, product.id)) return orderInputs[product.id]
     if (draft[product.id]?.confirmed) return draft[product.id].finalOrderQty
@@ -897,8 +890,9 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
     if (draft[product.id]?.confirmed) return
     const currentStock = getCurrentStock(product)
     const neededQty = getNeededQty(product)
-    const finalOrderQty = numberValue(getOrderInput(product))
-    if (finalOrderQty <= 0) return
+    const orderCartons = numberValue(getOrderInput(product))
+    const finalOrderQty = roundUpCartons(orderCartons)
+    if (orderCartons <= 0) return
     onRowChange(product, {
       currentChecked: currentStock,
       finalOrderQty,
@@ -991,7 +985,7 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
                     <div className="product-title">
                       <strong>{productDisplayName(product)}</strong>
                       <span>
-                        Current: {currentStock} pkt <em>|</em> Default: {product.keepStockQty} pkt <em>|</em> Required: {neededQty} pkt
+                        Current: {formatCtnQty(currentStock)} <em>|</em> Default: {formatCtnQty(product.keepStockQty)} <em>|</em> Required: {formatCtnQty(neededQty)}
                       </span>
                       {confirmed ? <span className="confirmed-badge">Confirmed</span> : null}
                     </div>
@@ -1000,7 +994,7 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
                       <strong>{costMoney(product.defaultBuyingPrice)}</strong>
                     </div>
                     <label className={autoFillHighlights[product.id] ? 'order-autofilled' : ''}>
-                      <span>Order qty</span>
+                      <span>Order qty (CTN)</span>
                       <input
                         type="number"
                         min="0"
@@ -1041,14 +1035,14 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
               <article className="confirmed-row" key={product.id}>
                 <div className="product-title">
                   <strong>{productDisplayName(product)}</strong>
-                  <span>Current {currentStock} pkt / Need {neededQty} pkt</span>
+                  <span>Current {formatCtnQty(currentStock)} / Need {formatCtnQty(neededQty)}</span>
                 </div>
                 <div className="mini-stat need-stat need">
                   <span>Order</span>
-                  <strong>{finalQty}</strong>
+                  <strong>{formatOrderQty(finalQty)}</strong>
                 </div>
                 <div className="confirmed-money">
-                  <span>{costMoney(costPrice)} / pkt</span>
+                  <span>{costMoney(costPrice)} / CTN</span>
                   <strong>{money(finalQty * costPrice)}</strong>
                 </div>
                 <div className="row-actions">
@@ -1074,7 +1068,7 @@ function PurchaseOrderPage({ products, suppliers, duitStock, draft, onRowChange,
       <div className="sticky-action">
         <div>
           <span>Total qty</span>
-          <strong>{totals.qty} pkt <em>|</em> {money(totals.value)}</strong>
+          <strong>{formatOrderQty(totals.qty)} <em>|</em> {money(totals.value)}</strong>
         </div>
       </div>
       {previewOrder ? (
@@ -1190,7 +1184,7 @@ function UpcomingOrders({ orders, onReceive, syncNotice }) {
               </div>
               <div className="order-summary-metrics">
                 <div><strong>{order.items.length}</strong><span>Products</span></div>
-                <div><strong>{totalQty}</strong><span>Packets</span></div>
+                <div><strong>{formatOrderQty(totalQty)}</strong><span>Cartons</span></div>
                 <div><strong>{money(totalValue)}</strong><span>Total value</span></div>
               </div>
               <div className="order-card-actions">
@@ -1221,9 +1215,9 @@ function PurchaseOrderPreview({ order, onClose }) {
     `Order Date: ${order.orderDate}`,
     `Created By: ${createdBy}`,
     '',
-    ...order.items.map((item, index) => `${index + 1}. ${item.productName} - ${item.finalOrderQty} pkt`),
+    ...order.items.map((item, index) => `${index + 1}. ${item.productName} - ${formatOrderQty(item.finalOrderQty)}`),
     '',
-    `Total Qty: ${totalQty} pkt`,
+    `Total Qty: ${formatOrderQty(totalQty)}`,
     'Notes: Please deliver according to the listed quantities.',
   ].join('\n')
 
@@ -1266,7 +1260,7 @@ function PurchaseOrderPreview({ order, onClose }) {
     ctx.font = '700 18px Ubuntu, Arial, sans-serif'
     ctx.fillText('No.', 68, tableTop + 28)
     ctx.fillText('Product Name', 130, tableTop + 28)
-    ctx.fillText('Qty (pkt)', 760, tableTop + 28)
+    ctx.fillText('Qty (CTN)', 760, tableTop + 28)
 
     ctx.font = '400 18px Ubuntu, Arial, sans-serif'
     order.items.forEach((item, index) => {
@@ -1279,12 +1273,12 @@ function PurchaseOrderPreview({ order, onClose }) {
       ctx.fillStyle = '#111111'
       ctx.fillText(String(index + 1), 68, y + 30)
       ctx.fillText(item.productName, 130, y + 30)
-      ctx.fillText(String(item.finalOrderQty), 790, y + 30)
+      ctx.fillText(formatOrderQty(item.finalOrderQty), 790, y + 30)
     })
 
     const bottom = tableTop + 64 + order.items.length * rowHeight
     ctx.font = '700 20px Ubuntu, Arial, sans-serif'
-    ctx.fillText(`Total Qty: ${totalQty} pkt`, 48, bottom)
+    ctx.fillText(`Total Qty: ${formatOrderQty(totalQty)}`, 48, bottom)
     ctx.font = '400 18px Ubuntu, Arial, sans-serif'
     ctx.fillStyle = '#333333'
     ctx.fillText('Notes: Please deliver according to the listed quantities.', 48, bottom + 44)
@@ -1333,14 +1327,14 @@ function PurchaseOrderPreview({ order, onClose }) {
             <div><strong>Created By:</strong> ${createdBy}</div>
           </div>
           <table>
-            <thead><tr><th>No.</th><th>Product Name</th><th class="qty">Qty (pkt)</th></tr></thead>
+            <thead><tr><th>No.</th><th>Product Name</th><th class="qty">Qty (CTN)</th></tr></thead>
             <tbody>
               ${order.items.map((item, index) => `
-                <tr><td>${index + 1}</td><td>${item.productName}</td><td class="qty">${item.finalOrderQty}</td></tr>
+                <tr><td>${index + 1}</td><td>${item.productName}</td><td class="qty">${formatOrderQty(item.finalOrderQty)}</td></tr>
               `).join('')}
             </tbody>
           </table>
-          <div class="total">Total Qty: ${totalQty} pkt</div>
+          <div class="total">Total Qty: ${formatOrderQty(totalQty)}</div>
           <div class="notes">Notes: Please deliver according to the listed quantities.</div>
         </body>
       </html>
@@ -1371,7 +1365,7 @@ function PurchaseOrderPreview({ order, onClose }) {
               <tr>
                 <th>No.</th>
                 <th>Product Name</th>
-                <th>Qty (pkt)</th>
+                <th>Qty (CTN)</th>
               </tr>
             </thead>
             <tbody>
@@ -1379,12 +1373,12 @@ function PurchaseOrderPreview({ order, onClose }) {
                 <tr key={item.productId}>
                   <td>{index + 1}</td>
                   <td>{item.productName}</td>
-                  <td>{item.finalOrderQty}</td>
+                  <td>{formatOrderQty(item.finalOrderQty)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <div className="po-total">Total Qty: {totalQty} pkt</div>
+          <div className="po-total">Total Qty: {formatOrderQty(totalQty)}</div>
           <p className="po-notes">Notes: Please deliver according to the listed quantities.</p>
         </div>
         <div className="po-actions">
@@ -1416,6 +1410,12 @@ function ReceiveOrder({ order, onConfirm, onBack }) {
     (sum, item) => sum + numberValue(receivedRows[item.productId]) * item.buyingPrice,
     0,
   )
+  const confirmReceivedRows = () => {
+    const rows = Object.fromEntries(
+      order.items.map((item) => [item.productId, numberValue(receivedRows[item.productId])]),
+    )
+    onConfirm(order.id, rows)
+  }
 
   return (
     <section className="page-stack with-sticky">
@@ -1431,21 +1431,21 @@ function ReceiveOrder({ order, onConfirm, onBack }) {
         <div className="receive-header">
           <span>Product</span>
           <span>Ordered</span>
-          <span>Received</span>
+          <span>Received CTN</span>
           <span>Value</span>
         </div>
         {order.items.map((item) => (
           <article className="receive-row" key={item.productId}>
             <div className="product-title">
               <strong>{item.productName}</strong>
-              <span>{costMoney(item.buyingPrice)} / pkt</span>
+              <span>{costMoney(item.buyingPrice)} / CTN</span>
             </div>
             <div className="mini-stat keep-stat">
               <span>Ordered</span>
-              <strong>{item.finalOrderQty}</strong>
+              <strong>{formatOrderQty(item.finalOrderQty)}</strong>
             </div>
             <label>
-              <span>Received</span>
+              <span>CTN</span>
               <input
                 type="number"
                 min="0"
@@ -1458,7 +1458,9 @@ function ReceiveOrder({ order, onConfirm, onBack }) {
             </label>
             <div className="mini-stat need-stat need">
               <span>Value</span>
-              <strong>{money(numberValue(receivedRows[item.productId]) * item.buyingPrice)}</strong>
+              <strong>
+                {money(numberValue(receivedRows[item.productId]) * item.buyingPrice)}
+              </strong>
             </div>
           </article>
         ))}
@@ -1469,7 +1471,7 @@ function ReceiveOrder({ order, onConfirm, onBack }) {
           <span>Received value</span>
           <strong>{money(receivedValue)}</strong>
         </div>
-        <button className="glow-button" onClick={() => onConfirm(order.id, receivedRows)}>
+        <button className="glow-button" onClick={confirmReceivedRows}>
           Confirm Receive & Close
         </button>
       </div>
@@ -1558,7 +1560,7 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
         }
       })
       setImportPreview({ changes, skipped })
-    } catch (error) {
+    } catch {
       setImportFileError('Could not read that file. Make sure it is a CSV exported from this app.')
     }
   }
@@ -1700,7 +1702,7 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
                     {importPreview.changes.map((change) => (
                       <tr key={change.id}>
                         <td>{change.label}</td>
-                        <td>{change.fromDefaultStock} {'->'} {change.toDefaultStock}</td>
+                        <td>{formatCtnQty(change.fromDefaultStock)} {'->'} {formatCtnQty(change.toDefaultStock)}</td>
                         <td>{change.fromCostPrice} {'->'} {change.toCostPrice}</td>
                         <td>{change.fromSellingPrice} {'->'} {change.toSellingPrice}</td>
                       </tr>
@@ -1741,7 +1743,7 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
                 </span>
                 <span>
                   <small>Total stock</small>
-                  <strong>{totalStock} pkt</strong>
+                  <strong>{formatCtnQty(totalStock)}</strong>
                 </span>
                 <span>
                   <small>Total value</small>
@@ -1759,7 +1761,7 @@ function ProductsPage({ products, suppliers, duitStock, editingProduct, onEdit, 
                     <article className="product-detail-row" key={product.id}>
                       <div className="product-title">
                         <strong>{productDisplayName(product)}</strong>
-                        <span>{duitStock[product.id]?.qty || 0} pkt current / {product.keepStockQty} pkt default</span>
+                        <span>{formatCtnQty(duitStock[product.id]?.qty || 0)} current / {formatCtnQty(product.keepStockQty)} default</span>
                         <p>{costMoney(product.defaultBuyingPrice)} cost | {costMoney(product.sellingPrice)} sell | {costMoney(numberValue(product.sellingPrice) - numberValue(product.defaultBuyingPrice))} margin</p>
                       </div>
                       <div className="entity-actions">
@@ -1787,7 +1789,12 @@ function ProductForm({ product, onSave, onCancel }) {
     event.preventDefault()
     await onSave(form)
     if (isNewProduct) {
-      setForm((current) => ({ ...current, flavour: '', currentStock: 0, keepStockQty: 20 }))
+      setForm((current) => ({
+        ...current,
+        flavour: '',
+        currentStock: 0,
+        keepStockQty: 20,
+      }))
       flavourInputRef.current?.focus()
     }
   }
@@ -1803,10 +1810,10 @@ function ProductForm({ product, onSave, onCancel }) {
         <input ref={flavourInputRef} value={form.flavour} onChange={(event) => update('flavour', event.target.value)} placeholder="Red, Blue, Black Menthol, Ice Blast, Classic" required />
       </label>
       <div className="stock-price-row">
-        <label>
+        <div className="stock-unit-row">
           <span>Current stock</span>
-          <input type="number" min="0" inputMode="numeric" value={form.currentStock} onChange={(event) => update('currentStock', event.target.value)} placeholder="Packets" />
-        </label>
+          <input type="number" min="0" step="0.1" inputMode="decimal" value={form.currentStock ?? 0} onChange={(event) => update('currentStock', event.target.value)} placeholder="0.0 CTN" />
+        </div>
         <label>
           <span>Cost price</span>
           <input type="number" min="0" step="0.001" inputMode="decimal" value={form.costPrice ?? form.defaultBuyingPrice} onChange={(event) => update('costPrice', event.target.value)} placeholder="17.064" />
@@ -1816,10 +1823,10 @@ function ProductForm({ product, onSave, onCancel }) {
         <span>Selling price (applies to all {form.brand || 'this brand'} flavours)</span>
         <input type="number" min="0" step="0.01" inputMode="decimal" value={form.sellingPrice ?? 0} onChange={(event) => update('sellingPrice', event.target.value)} placeholder="25.00" />
       </label>
-      <label>
-        <span>Default stock (packets)</span>
-        <input type="number" min="0" inputMode="numeric" value={form.keepStockQty} onChange={(event) => update('keepStockQty', event.target.value)} placeholder="Packets" />
-      </label>
+      <div className="stock-unit-row wide-field">
+        <span>Default stock</span>
+        <input type="number" min="0" step="0.1" inputMode="decimal" value={form.keepStockQty ?? 0} onChange={(event) => update('keepStockQty', event.target.value)} placeholder="0.0 CTN" />
+      </div>
       <div className="form-actions">
         <button className="ghost-button" type="button" onClick={onCancel}>Cancel</button>
         <button className="glow-button compact" type="submit">Save product</button>
